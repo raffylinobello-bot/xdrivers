@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>XDrive - Real Download Edition</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        :root { --blue: #1a73e8; --gray: #5f6368; --bg: #f8f9fa; }
+        body { background: white; font-family: 'Segoe UI', sans-serif; overflow: hidden; }
+        
+        .sidebar { height: 100vh; width: 260px; border-right: 1px solid #dadce0; position: fixed; padding: 15px; }
+        .main { margin-left: 260px; height: 100vh; overflow-y: auto; padding: 20px 40px; }
+        
+        .upload-btn {
+            background: white; border: 1px solid #dadce0; border-radius: 24px;
+            padding: 12px 24px; display: flex; align-items: center; gap: 12px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1); transition: 0.3s; cursor: pointer;
+            margin-bottom: 20px; font-weight: 500;
+        }
+        .upload-btn:hover { box-shadow: 0 4px 8px rgba(0,0,0,0.15); background: #f1f3f4; }
+        
+        .nav-item { padding: 10px 20px; border-radius: 0 20px 20px 0; display: flex; align-items: center; gap: 15px; cursor: pointer; color: var(--gray); }
+        .nav-item.active { background: #e8f0fe; color: var(--blue); font-weight: 600; }
+
+        .file-card {
+            border: 1px solid #dadce0; border-radius: 12px; padding: 15px;
+            background: white; transition: 0.2s; cursor: pointer; position: relative;
+        }
+        .file-card:hover { border-color: transparent; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+        
+        .delete-btn { position: absolute; top: 8px; right: 8px; border: none; background: none; color: var(--gray); display: none; }
+        .file-card:hover .delete-btn { display: block; }
+
+        .modal-overlay { position: fixed; top:0; left:0; width:100%; height:100%; background: rgba(0,0,0,0.4); z-index: 1000; display: flex; align-items: center; justify-content: center; }
+        .preview-box { background: white; border-radius: 16px; padding: 30px; width: 400px; text-align: center; }
+        .hidden { display: none !important; }
+        #file-input { display: none; }
+    </style>
+</head>
+<body>
+
+    <div class="sidebar">
+        <div class="d-flex align-items-center mb-4 ps-2">
+            <i data-lucide="cloud-lightning" class="text-primary me-2"></i>
+            <h4 class="mb-0">XDrive</h4>
+        </div>
+        <label for="file-input" class="upload-btn">
+            <i data-lucide="plus" class="text-success"></i>
+            <span>Nuovo</span>
+        </label>
+        <input type="file" id="file-input">
+        <div class="nav flex-column">
+            <div class="nav-item active" onclick="switchTab('files', this)"><i data-lucide="folder"></i> I miei file</div>
+            <div class="nav-item" onclick="switchTab('trash', this)"><i data-lucide="trash-2"></i> Cestino</div>
+        </div>
+    </div>
+
+    <div class="main">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <input type="text" id="search" class="form-control w-50 bg-light border-0" placeholder="Cerca file...">
+        </div>
+        <h5 id="view-title" class="mb-4">I miei file</h5>
+        <div class="row g-3" id="file-grid"></div>
+    </div>
+
+    <div id="preview-modal" class="modal-overlay hidden" onclick="closePreview()">
+        <div class="preview-box" onclick="event.stopPropagation()">
+            <div id="modal-icon-container" class="mb-3"></div>
+            <h4 id="modal-name" class="mb-2 text-truncate">Nome File</h4>
+            <p id="modal-size" class="text-muted small mb-4">Dimensione: --</p>
+            <div class="d-grid gap-2">
+                <a id="real-download-link" class="btn btn-primary py-2" href="#" download>Scarica File</a>
+                <button class="btn btn-light py-2" onclick="closePreview()">Chiudi</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let files = []; // Archivio file (caricati in sessione)
+        let currentTab = 'files';
+
+        function render(searchQuery = '') {
+            const grid = document.getElementById('file-grid');
+            grid.innerHTML = '';
+            const filtered = files.filter(f => {
+                const matchesTab = (currentTab === 'files') ? !f.deleted : f.deleted;
+                return matchesTab && f.name.toLowerCase().includes(searchQuery.toLowerCase());
+            });
+
+            filtered.forEach(file => {
+                const div = document.createElement('div');
+                div.className = 'col-md-3 col-lg-2';
+                div.innerHTML = `
+                    <div class="file-card text-center" onclick="openPreview('${file.id}')">
+                        <button class="delete-btn" onclick="handleDelete(event, '${file.id}')">
+                            <i data-lucide="${currentTab === 'files' ? 'trash' : 'rotate-ccw'}"></i>
+                        </button>
+                        <i data-lucide="file" class="text-primary mb-2" size="48"></i>
+                        <p class="small mb-0 text-truncate fw-bold">${file.name}</p>
+                    </div>
+                `;
+                grid.appendChild(div);
+            });
+            lucide.createIcons();
+        }
+
+        // GESTIONE CARICAMENTO REALE
+        document.getElementById('file-input').addEventListener('change', (e) => {
+            const fileData = e.target.files[0];
+            if(!fileData) return;
+
+            // Creiamo un oggetto che contiene il file reale (Blob)
+            const newFile = {
+                id: crypto.randomUUID(),
+                name: fileData.name,
+                size: (fileData.size / 1024).toFixed(2) + " KB",
+                blob: fileData, // Salviamo il file intero in memoria
+                deleted: false
+            };
+            
+            files.push(newFile);
+            render();
+            e.target.value = ''; // Reset input
+        });
+
+        // APERTURA ANTEPRIMA E PREPARAZIONE DOWNLOAD
+        function openPreview(id) {
+            const file = files.find(f => f.id === id);
+            const downloadLink = document.getElementById('real-download-link');
+            
+            document.getElementById('modal-name').innerText = file.name;
+            document.getElementById('modal-size').innerText = "Dimensione: " + file.size;
+            document.getElementById('modal-icon-container').innerHTML = `<i data-lucide="file" size="64" class="text-primary"></i>`;
+            
+            // GENERIAMO L'URL REALE PER IL DOWNLOAD
+            const fileURL = URL.createObjectURL(file.blob);
+            downloadLink.href = fileURL;
+            downloadLink.download = file.name; // Forza il nome originale del file
+
+            document.getElementById('preview-modal').classList.remove('hidden');
+            lucide.createIcons();
+        }
+
+        function closePreview() {
+            document.getElementById('preview-modal').classList.add('hidden');
+        }
+
+        function handleDelete(e, id) {
+            e.stopPropagation();
+            const file = files.find(f => f.id === id);
+            file.deleted = !file.deleted;
+            render();
+        }
+
+        function switchTab(tab, el) {
+            currentTab = tab;
+            document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+            el.classList.add('active');
+            document.getElementById('view-title').innerText = tab === 'files' ? 'I miei file' : 'Cestino';
+            render();
+        }
+
+        document.getElementById('search').addEventListener('input', (e) => render(e.target.value));
+        
+        lucide.createIcons();
+    </script>
+</body>
+</html>
